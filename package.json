@@ -1,0 +1,24 @@
+{
+  "name": "banana-web",
+  "version": "1.0.0",
+  "description": "香蕉实验室独立前端 - 批量生图工具",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "banana",
+    "listenhub",
+    "ai",
+    "image-generation"
+  ],
+  "author": "苏糖",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "node-fetch": "^3.3.2"
+  }
+}

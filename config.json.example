@@ -1,0 +1,15 @@
+{
+  "moemail": {
+    "baseUrl": "https://mail.example.com",
+    "apiKey": "your-api-key-here"
+  },
+  "fingerprint": {
+    "browserPath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+  },
+  "generation": {
+    "defaultPrompt": "",
+    "defaultSize": "2K",
+    "defaultRatio": "1:1",
+    "interval": 2000
+  }
+}

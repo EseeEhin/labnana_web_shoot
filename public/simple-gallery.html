@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>极简图库 - 调试模式</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f0f0; }
+        h1 { text-align: center; }
+        #status { text-align: center; margin-bottom: 20px; color: #666; }
+        .grid { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+        .card { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); width: 200px; }
+        .card img { width: 100%; height: 200px; object-fit: cover; border-radius: 4px; background: #eee; }
+        .card .info { font-size: 12px; margin-top: 5px; color: #333; word-break: break-all; }
+        .error { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>🍌 极简图库 (调试用)</h1>
+    <div id="status">正在加载数据...</div>
+    <div id="grid" class="grid"></div>
+
+    <script>
+        const API_URL = '/api/images?page=1&pageSize=500'; // 获取前500张
+
+        async function loadImages() {
+            const statusEl = document.getElementById('status');
+            const gridEl = document.getElementById('grid');
+
+            try {
+                statusEl.textContent = '正在请求 API...';
+                const response = await fetch(API_URL);
+                const result = await response.json();
+
+                if (!result.success) {
+                    statusEl.innerHTML = `<span class="error">API 错误: ${result.message}</span>`;
+                    return;
+                }
+
+                const images = result.data.images || [];
+                statusEl.textContent = `获取成功: 共 ${images.length} 张图片`;
+
+                if (images.length === 0) {
+                    gridEl.innerHTML = '<div>暂无图片</div>';
+                    return;
+                }
+
+                gridEl.innerHTML = images.map(img => {
+                    const url = img.thumbnailUrl || img.imageUrl;
+                    const date = new Date(img.createdAt).toLocaleString();
+                    return `
+                        <div class="card">
+                            <a href="${img.imageUrl}" target="_blank">
+                                <img src="${url}" alt="加载失败" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>❌</text></svg>'">
+                            </a>
+                            <div class="info">
+                                <div>ID: ${img.id.substring(0, 8)}...</div>
+                                <div>账户: ${img.accountEmail}</div>
+                                <div>时间: ${date}</div>
+                                <div>状态: ${img.status}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (e) {
+                statusEl.innerHTML = `<span class="error">加载失败: ${e.message}</span>`;
+                console.error(e);
+            }
+        }
+
+        loadImages();
+    </script>
+</body>
+</html>

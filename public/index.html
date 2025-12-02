@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍌 香蕉实验室 - 独立前端</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍌</text></svg>">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <span class="logo-icon">🍌</span>
+                <span class="logo-text">香蕉实验室</span>
+            </div>
+            <div class="status-bar">
+                <div class="status-item"><span class="status-dot" id="status-dot"></span><span id="status-text">连接中...</span></div>
+                <div class="status-item">账户: <span id="account-count">0</span></div>
+                <div class="status-item">可用: <span id="available-count">0</span></div>
+                <div class="status-item" title="心跳自动刷新积分和签到">💓 <span id="heartbeat-status">--</span></div>
+            </div>
+            <button class="theme-toggle" id="theme-toggle" title="切换主题">
+                <span id="theme-icon">🌙</span>
+            </button>
+        </header>
+        
+        <div class="tabs">
+            <div class="tab active" data-tab="generate">🎨 生成图片</div>
+            <div class="tab" data-tab="accounts">👤 账户管理</div>
+            <div class="tab" data-tab="gallery">🖼️ 图片库</div>
+            <div class="tab" data-tab="settings">⚙️ 设置</div>
+        </div>
+        
+        <!-- 生成图片面板 -->
+        <div class="panel active" id="panel-generate">
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-value" id="stat-accounts">0</div><div class="stat-label">总账户</div></div>
+                <div class="stat-card"><div class="stat-value" id="stat-available">0</div><div class="stat-label">可用账户</div></div>
+                <div class="stat-card"><div class="stat-value" id="stat-images">0</div><div class="stat-label">已生成</div></div>
+                <div class="stat-card"><div class="stat-value" id="stat-pending">0</div><div class="stat-label">进行中</div></div>
+            </div>
+            
+            <!-- 全局设置 -->
+            <div class="section">
+                <div class="section-title">⚙️ 全局设置</div>
+                <div class="form-group">
+                    <label class="form-label">选择参与账户 (留空则随机选择)</label>
+                    <div id="account-selector" class="account-selector">
+                        <!-- 账户复选框将通过 JS 动态插入 -->
+                        <div style="padding: 10px; color: rgba(255,255,255,0.5); font-size: 12px;">加载账户中...</div>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">并发账户数 (未指定账户时生效)</label>
+                        <input type="number" class="input" id="concurrency" value="1" min="1" max="20" title="同时使用多少个账户进行生成">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">请求间隔 (ms)</label>
+                        <input type="number" class="input" id="interval" value="2000" min="500" step="500" title="每个账户发送请求后的等待时间">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">最大轮次 (0=无限)</label>
+                        <input type="number" class="input" id="maxRounds" value="0" min="0" title="自动停止的轮次限制">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 配置列表 -->
+            <div class="section">
+                <div class="section-title">
+                    📝 生成配置
+                    <button class="btn btn-sm btn-secondary" id="btn-add-config" style="margin-left: auto;">+ 添加配置</button>
+                </div>
+                <div id="configs-container">
+                    <!-- 配置项将通过 JS 动态插入 -->
+                </div>
+            </div>
+
+            <div class="section">
+                <div style="display: flex; gap: 12px;">
+                    <button class="btn btn-primary" id="btn-start-concurrent">🚀 启动并发任务</button>
+                    <button class="btn btn-danger" id="btn-stop-concurrent" disabled>⏹️ 停止任务</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">📋 运行日志</div>
+                <div class="log-container" id="log-container"><div class="log-item info">[系统] 等待操作...</div></div>
+            </div>
+        </div>
+        
+        <!-- 账户管理面板 -->
+        <div class="panel" id="panel-accounts">
+            <div class="section">
+                <div class="section-title">➕ 添加账户</div>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                    <button class="btn btn-primary" id="btn-auto-register">🤖 自动注册</button>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 13px; color: rgba(255,255,255,0.6);">数量:</span>
+                        <input type="number" class="input" id="register-count" value="1" min="1" max="10" style="width: 60px; padding: 8px;">
+                    </div>
+                    <button class="btn btn-secondary" id="btn-manual-register">🖥️ 手动注册</button>
+                    <button class="btn btn-secondary" id="btn-add-token">🔑 添加 Token</button>
+                </div>
+            </div>
+            <div class="section">
+                <div class="section-title">📋 注册日志</div>
+                <div class="log-container" id="register-log"><div class="log-item info">[系统] 等待操作...</div></div>
+            </div>
+            <div class="section">
+                <div class="section-title">
+                    👥 账户列表
+                    <div style="margin-left: auto; display: flex; gap: 8px;">
+                        <button class="btn btn-sm btn-secondary" id="btn-checkin-all">📅 全部签到</button>
+                        <button class="btn btn-sm btn-secondary" id="btn-refresh-all">🔄 刷新积分</button>
+                    </div>
+                </div>
+                <div class="account-list" id="account-list">
+                    <div class="empty-state"><div class="empty-state-icon">👤</div><div>暂无账户</div></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 图片库面板 -->
+        <div class="panel" id="panel-gallery">
+            <div class="section">
+                <div class="section-title">
+                    🖼️ 图片库
+                    <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+                        <a href="simple-gallery.html" target="_blank" class="btn btn-sm btn-primary" style="text-decoration: none;">🚀 极简模式</a>
+                        <span id="pagination-info" style="font-size: 12px; color: rgba(255,255,255,0.5);"></span>
+                        <button class="btn btn-sm btn-secondary" id="btn-refresh-images">🔄 刷新</button>
+                    </div>
+                </div>
+                <div class="gallery-filters" style="margin-bottom: 16px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                    <input type="text" class="input" id="filter-keyword" placeholder="搜索提示词..." style="width: 200px; padding: 8px 12px;">
+                    <select class="input" id="filter-account" style="width: auto; padding: 8px 12px;">
+                        <option value="">所有账户</option>
+                    </select>
+                    <select class="input" id="filter-status" style="width: auto; padding: 8px 12px;">
+                        <option value="">所有状态</option>
+                        <option value="success">✅ 已完成</option>
+                        <option value="pending">⏳ 排队中</option>
+                        <option value="processing">🔄 生成中</option>
+                        <option value="failed">❌ 失败</option>
+                    </select>
+                    <select class="input" id="filter-aspect-ratio" style="width: auto; padding: 8px 12px;">
+                        <option value="">所有比例</option>
+                        <option value="1:1">1:1</option>
+                        <option value="3:4">3:4</option>
+                        <option value="4:3">4:3</option>
+                        <option value="16:9">16:9</option>
+                        <option value="9:16">9:16</option>
+                    </select>
+                    <button class="btn btn-primary" id="btn-search-images">🔍 搜索</button>
+                </div>
+                
+                <!-- 批量操作栏 -->
+                <div class="batch-actions-bar" style="margin-bottom: 16px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; display: flex; align-items: center; gap: 12px;">
+                    <div class="form-check" style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="toggle-batch-mode" style="width: 18px; height: 18px;">
+                        <label for="toggle-batch-mode" style="cursor: pointer; user-select: none;">批量管理模式</label>
+                    </div>
+                    
+                    <div id="batch-tools" style="display: none; align-items: center; gap: 12px; margin-left: 12px; border-left: 1px solid rgba(255,255,255,0.2); padding-left: 12px; flex: 1;">
+                        <div class="form-check" style="display: flex; align-items: center; gap: 6px;">
+                            <input type="checkbox" id="select-all-images" style="width: 16px; height: 16px;">
+                            <label for="select-all-images" style="font-size: 13px; cursor: pointer;">全选本页</label>
+                        </div>
+                        <span id="selected-count" style="font-size: 13px; color: #ff9a56; margin-left: auto;">已选: 0</span>
+                        <button class="btn btn-sm btn-primary" id="btn-batch-download">📥 批量下载</button>
+                        <button class="btn btn-sm btn-danger" id="btn-batch-delete">🗑️ 批量删除</button>
+                    </div>
+                </div>
+
+                <div class="image-grid" id="image-grid">
+                    <div class="empty-state" style="grid-column: 1/-1;"><div class="empty-state-icon">🖼️</div><div>暂无图片</div></div>
+                </div>
+                
+                <!-- 分页控件 -->
+                <div class="pagination-controls" style="margin-top: 20px; display: flex; justify-content: center; gap: 10px; align-items: center; padding-bottom: 20px;">
+                    <button class="btn btn-sm btn-secondary" id="btn-prev-page">上一页</button>
+                    <span id="pagination-text" style="font-size: 14px; color: rgba(255,255,255,0.7);">第 1 / 1 页</span>
+                    <button class="btn btn-sm btn-secondary" id="btn-next-page">下一页</button>
+                    <div style="display: flex; align-items: center; gap: 5px; margin-left: 10px;">
+                        <input type="number" class="input" id="jump-to-page" min="1" style="width: 60px; padding: 4px; text-align: center;" placeholder="页码">
+                        <button class="btn btn-sm btn-secondary" id="btn-jump-page">跳转</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 设置面板 -->
+        <div class="panel" id="panel-settings">
+            <div class="config-section">
+                <div class="config-title">📧 MoEmail 配置（自动注册）</div>
+                <div class="form-group">
+                    <label class="form-label">API 地址</label>
+                    <input type="text" class="input" id="moemail-url" placeholder="https://your-moemail-server.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">API Key</label>
+                    <input type="password" class="input" id="moemail-key" placeholder="your-api-key">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">HTTP 代理（可选，用于网络问题）</label>
+                    <input type="text" class="input" id="proxy-url" placeholder="http://127.0.0.1:7890">
+                </div>
+            </div>
+            <div class="config-section">
+                <div class="config-title">🖥️ 指纹浏览器配置</div>
+                <div class="form-group">
+                    <label class="form-label">浏览器路径</label>
+                    <input type="text" class="input" id="browser-path" placeholder="C:\Program Files\Browser\browser.exe">
+                </div>
+            </div>
+            <button class="btn btn-primary" id="btn-save-config">💾 保存配置</button>
+        </div>
+    </div>
+    
+    <!-- 图片预览模态框 -->
+    <div class="modal" id="image-modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <div style="display: flex; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 300px;">
+                    <img class="modal-image" id="modal-image" src="" style="width: 100%; max-height: 70vh; object-fit: contain;">
+                </div>
+                <div class="modal-info" style="flex: 0 0 280px; padding: 20px;">
+                    <h3 style="margin-bottom: 16px; color: #ff9a56;">📝 提示词</h3>
+                    <div id="modal-prompt" style="margin-bottom: 20px; font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.8); max-height: 150px; overflow-y: auto;"></div>
+                    
+                    <h3 style="margin-bottom: 12px; color: #ff9a56;">📊 详细信息</h3>
+                    <div id="modal-details" style="margin-bottom: 20px; font-size: 13px;"></div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <button class="btn btn-primary" id="btn-download" style="width: 100%;">📥 下载原图 (PNG)</button>
+                        <button class="btn btn-secondary" id="btn-download-thumb" style="width: 100%;">📥 下载缩略图 (WebP)</button>
+                        <button class="btn btn-secondary" onclick="closeModal()" style="width: 100%;">关闭</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 添加 Token 模态框 -->
+    <div class="modal" id="token-modal">
+        <div class="modal-content" style="padding: 24px; width: 400px;">
+            <button class="modal-close" onclick="closeTokenModal()">&times;</button>
+            <h3 style="margin-bottom: 20px;">🔑 添加 Token</h3>
+            <div class="form-group">
+                <label class="form-label">邮箱（可选）</label>
+                <input type="email" class="input" id="add-email" placeholder="account@example.com">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Token</label>
+                <textarea class="input" id="add-token" placeholder="粘贴 JWT Token" style="min-height: 80px;"></textarea>
+            </div>
+            <button class="btn btn-primary" id="btn-submit-token" style="width: 100%;">添加账户</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -128,6 +128,7 @@ async function loadConfig() {
     if (result.success) {
         const data = result.data;
         document.getElementById('moemail-url').value = data.moemail?.baseUrl || '';
+        document.getElementById('moemail-domain').value = data.moemail?.domain || '';
         document.getElementById('browser-path').value = data.fingerprint?.browserPath || '';
     }
 }
@@ -953,7 +954,8 @@ async function saveConfig() {
     const config = {
         moemail: {
             baseUrl: document.getElementById('moemail-url').value.trim(),
-            apiKey: document.getElementById('moemail-key').value.trim()
+            apiKey: document.getElementById('moemail-key').value.trim(),
+            domain: document.getElementById('moemail-domain').value.trim()
         },
         fingerprint: {
             browserPath: document.getElementById('browser-path').value.trim()

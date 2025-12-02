@@ -49,7 +49,7 @@ async function init() {
     log('正在初始化...', 'info');
     await loadStatus();
     await loadConfig();
-    await loadImages();
+    // await loadImages(); // 移除自动加载，改为点击 Tab 加载
     renderConfigs(); // 渲染初始配置
     renderAccountSelector(); // 渲染账户选择器
     setInterval(loadStatus, 30000);
@@ -94,7 +94,7 @@ async function loadStatus() {
         document.getElementById('stat-accounts').textContent = data.totalAccounts;
         document.getElementById('stat-available').textContent = data.availableAccounts;
         document.getElementById('stat-images').textContent = data.totalImages;
-        document.getElementById('stat-pending').textContent = data.pendingTasks;
+        document.getElementById('stat-pending').textContent = state.concurrentTask && state.concurrentTask.status === 'running' ? '运行中' : '空闲';
         
         // 检查账户列表是否有变化，如果有则重新渲染选择器
         const oldAccounts = JSON.stringify(state.accounts.map(a => a.id).sort());
@@ -111,12 +111,9 @@ async function loadStatus() {
             const hb = data.heartbeat;
             const heartbeatEl = document.getElementById('heartbeat-status');
             if (heartbeatEl) {
-                if (hb.nextCreditsRefresh > 0) {
-                    heartbeatEl.textContent = `${hb.nextCreditsRefresh}s`;
-                    heartbeatEl.title = `下次刷新积分: ${hb.nextCreditsRefresh}秒\n今日签到: ${hb.todayCheckedIn ? '✅' : '❌'}`;
-                } else {
-                    heartbeatEl.textContent = '刷新中...';
-                }
+                heartbeatEl.textContent = '运行中';
+                heartbeatEl.title = `心跳间隔: ${hb.interval}秒`;
+                heartbeatEl.style.color = '#4caf50';
             }
         }
     } else {
@@ -290,6 +287,11 @@ function bindEvents() {
             document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
             document.getElementById(`panel-${tab.dataset.tab}`).classList.add('active');
+            
+            // 懒加载图库
+            if (tab.dataset.tab === 'gallery' && state.images.length === 0) {
+                loadImages();
+            }
         });
     });
 

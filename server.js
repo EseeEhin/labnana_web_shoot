@@ -28,12 +28,10 @@ const DATA_FILE = path.join(__dirname, 'data.json');
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 
 // 心跳配置
-const HEARTBEAT_INTERVAL = 60000; // 1分钟检查一次
-const CREDITS_REFRESH_INTERVAL = 300000; // 5分钟刷新一次积分
-const AUTO_CHECKIN_HOUR = 8; // 每天8点自动签到
+const HEARTBEAT_INTERVAL = 5000; // 5秒检查一次（并发刷新积分）
 
 // 并发任务配置
-const TASK_CREDITS_CHECK_INTERVAL = 5000; // 5秒检测一次积分
+const TASK_CREDITS_CHECK_INTERVAL = 5000; // 5秒检测一次积分（从本地数据读取）
 const MIN_CREDITS_REQUIRED = 15; // 最低积分要求
 
 // ==================== 配置 ====================
@@ -54,7 +52,7 @@ function loadData() {
     }
     return {
         accounts: [],
-        tasks: [],
+        tasks: [], // 保留字段以兼容旧数据结构，但不再使用
         images: []
     };
 }
@@ -141,43 +139,34 @@ class ConcurrentTask {
         return this.participatingAccounts.length;
     }
     
-    // 刷新参与账户的积分
+    // 刷新参与账户的积分（从本地数据读取，不再调用 API）
     async refreshCredits() {
-        console.log(`[并发任务 ${this.id}] 刷新参与账户积分...`);
+        // 重新加载数据以获取最新积分（由心跳任务更新）
+        data = loadData();
+        
         let availableCount = 0;
         
-        // 只刷新参与任务的账户
+        // 更新参与账户的积分信息
         for (const account of this.participatingAccounts) {
-            try {
-                const credits = await getCredits(account.token);
-                if (credits !== null) {
-                    const oldCredits = account.credits;
-                    account.credits = credits;
-                    
-                    // 同步更新 data.accounts 中的积分
-                    const dataAccount = data.accounts.find(a => a.id === account.id);
-                    if (dataAccount) {
-                        dataAccount.credits = credits;
-                    }
-                    
-                    if (oldCredits !== credits) {
-                        console.log(`[并发任务] ${account.email}: 更新账户积分，实际积分为：${credits}`);
-                    }
-                    
-                    if (credits >= MIN_CREDITS_REQUIRED) {
-                        availableCount++;
-                    }
+            const latestAccount = data.accounts.find(a => a.id === account.id);
+            
+            if (latestAccount) {
+                // 更新内存中的积分
+                account.credits = latestAccount.credits;
+                
+                if (account.credits >= MIN_CREDITS_REQUIRED) {
+                    availableCount++;
                 }
-            } catch (e) {
-                console.error(`[并发任务] 刷新 ${account.email} 积分失败:`, e.message);
+            } else {
+                // 账户可能被删除了
+                console.log(`[并发任务] 账户 ${account.email} 已不存在，停止该账户任务`);
+                account.credits = 0; // 标记为0分，自然停止
             }
         }
         
-        saveData(data);
-        
         // 检查是否所有账户积分都不足
         if (availableCount === 0) {
-            console.log(`[并发任务 ${this.id}] 所有参与账户积分不足，自动停止`);
+            console.log(`[并发任务 ${this.id}] 所有参与账户积分不足或已删除，自动停止`);
             this.stop('所有参与账户积分不足');
             return false;
         }
@@ -186,13 +175,23 @@ class ConcurrentTask {
     }
     
     // 账户工作线程
-    async runAccountWorker(account) {
-        console.log(`[并发任务 ${this.id}] 账户 ${account.email} 工作线程启动`);
+    async runAccountWorker(accountInfo) {
+        console.log(`[并发任务 ${this.id}] 账户 ${accountInfo.email} 工作线程启动`);
+        const accountId = accountInfo.id;
         
         while (this.status === 'running') {
+            // 每次循环都重新获取最新的账户信息
+            data = loadData();
+            const currentAccount = data.accounts.find(a => a.id === accountId);
+            
+            if (!currentAccount) {
+                console.log(`[并发任务] 账户 ${accountInfo.email} (ID: ${accountId}) 已被删除，停止线程`);
+                break;
+            }
+            
             // 检查积分
-            if (account.credits < MIN_CREDITS_REQUIRED) {
-                console.log(`[并发任务] 账户 ${account.email} 积分不足，暂停使用`);
+            if (currentAccount.credits < MIN_CREDITS_REQUIRED) {
+                // console.log(`[并发任务] 账户 ${currentAccount.email} 积分不足 (${currentAccount.credits})，暂停使用`);
                 await new Promise(r => setTimeout(r, 5000)); // 等待5秒再检查
                 continue;
             }
@@ -201,10 +200,10 @@ class ConcurrentTask {
             const config = this.configs[this.configIndex % this.configs.length];
             this.configIndex++; // 指向下一个配置
             
-            // 执行生成
-            await this.generateForConfig(config, account);
+            // 执行生成 (使用最新的 account 对象)
+            await this.generateForConfig(config, currentAccount);
             
-            // 检查最大轮次（这里简单用生成总数近似判断，或者不判断，由外部控制）
+            // 检查最大轮次
             if (this.maxRounds > 0 && this.generatedCount >= this.maxRounds * this.configs.length) {
                 this.stop('达到最大生成数量');
                 break;
@@ -222,8 +221,8 @@ class ConcurrentTask {
         try {
             console.log(`[并发任务 ${this.id}] 账户 ${account.email} -> 配置 #${config.id}`);
             
-            // 扣除预估积分
-            account.credits -= 15;
+            // 本地不扣除积分，完全依赖心跳从云端同步
+            // account.credits -= 15;
             
             let result = await generateImage(account.token, {
                 prompt: config.prompt,
@@ -267,8 +266,10 @@ class ConcurrentTask {
                 const errorMsg = result.message || `API错误码: ${result.code}`;
                 console.log(`[并发任务 ${this.id}] 生成失败: ${errorMsg}`);
                 
+                // 如果 API 明确返回积分不足，才在本地标记为 0，等待心跳刷新
                 if (errorMsg.includes('积分') || errorMsg.includes('credit') || errorMsg.includes('insufficient')) {
                     account.credits = 0;
+                    console.log(`[并发任务] 账户 ${account.email} 积分不足，本地标记为 0`);
                 }
                 
                 this.results.push({
@@ -296,16 +297,8 @@ class ConcurrentTask {
                 };
                 this.results.push(genResult);
                 
-                // 记录到全局任务列表
-                data.tasks.push({
-                    id: taskId,
-                    accountId: account.id,
-                    prompt: config.prompt,
-                    concurrentTaskId: this.id,
-                    status: 'pending',
-                    createdAt: new Date().toISOString()
-                });
-                saveData(data);
+                // 记录到全局任务列表 (已移除，避免文件膨胀)
+                // saveData(data);
                 
                 console.log(`[并发任务 ${this.id}] 生成成功 #${this.generatedCount}, taskId: ${taskId}`);
                 return genResult;
@@ -601,21 +594,28 @@ async function verifyCode(email, code) {
 
 // 获取用户积分 - 使用 /users/subscription 端点
 // 返回 totalAvailableCredits 字段
+// 添加超时控制，防止卡死
 async function getCredits(token) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+    
     try {
         const response = await fetch(`${API.USERS}/subscription`, {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Origin': 'https://banana.listenhub.ai',
                 'Referer': 'https://banana.listenhub.ai/'
-            }
+            },
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
+        
         if (!response.ok) {
-            console.log(`[积分] 获取失败: ${response.status}`);
+            // console.log(`[积分] 获取失败: ${response.status}`);
             return null;
         }
         const result = await response.json();
-        console.log(`[积分] 响应:`, JSON.stringify(result).substring(0, 300));
+        // console.log(`[积分] 响应:`, JSON.stringify(result).substring(0, 300));
         
         // 积分在 data.totalAvailableCredits
         if (result.code === 0 && result.data) {
@@ -623,7 +623,9 @@ async function getCredits(token) {
         }
         return result.totalAvailableCredits ?? 0;
     } catch (e) {
-        console.error(`[积分] 错误:`, e.message);
+        clearTimeout(timeoutId);
+        // 静默处理错误，不打印日志避免刷屏
+        // console.error(`[积分] 错误:`, e.message);
         return null;
     }
 }
@@ -799,6 +801,9 @@ function getAvailableAccount() {
 
 // 获取系统状态
 app.get('/api/status', (req, res) => {
+    // 重新加载数据确保最新
+    data = loadData();
+    
     const accounts = data.accounts.map(a => ({
         id: a.id,
         email: a.email,
@@ -809,23 +814,17 @@ app.get('/api/status', (req, res) => {
         createdAt: a.createdAt
     }));
     
-    const now = Date.now();
-    const nextCreditsRefresh = Math.max(0, CREDITS_REFRESH_INTERVAL - (now - lastCreditsRefresh));
-    const today = new Date().toISOString().split('T')[0];
-    
     res.json({
         success: true,
         data: {
             accounts,
             totalAccounts: accounts.length,
             availableAccounts: accounts.filter(a => a.credits >= 15).length,
-            pendingTasks: data.tasks.filter(t => t.status === 'pending').length,
+            pendingTasks: 0, // 已移除任务记录功能
             totalImages: data.images.length,
             heartbeat: {
-                lastCreditsRefresh: lastCreditsRefresh ? new Date(lastCreditsRefresh).toISOString() : null,
-                nextCreditsRefresh: Math.round(nextCreditsRefresh / 1000),
-                lastAutoCheckin: lastAutoCheckin,
-                todayCheckedIn: lastAutoCheckin === today
+                interval: HEARTBEAT_INTERVAL / 1000,
+                status: 'running'
             }
         }
     });
@@ -1171,16 +1170,19 @@ app.post('/api/accounts/checkin-all', async (req, res) => {
 
 // 刷新所有账户积分
 app.post('/api/accounts/refresh-all', async (req, res) => {
-    for (const account of data.accounts) {
-        if (account.token) {
-            const credits = await getCredits(account.token);
-            if (credits !== null) {
-                account.credits = credits;
-            }
-        }
+    console.log('[API] 手动触发积分刷新...');
+    
+    if (heartbeatRunning) {
+        return res.json({ success: true, message: '积分刷新任务已在后台运行中' });
     }
-    saveData(data);
-    res.json({ success: true, message: '积分已刷新' });
+    
+    // 手动触发心跳逻辑
+    try {
+        await heartbeat();
+        res.json({ success: true, message: '积分已刷新' });
+    } catch (e) {
+        res.json({ success: false, message: `刷新失败: ${e.message}` });
+    }
 });
 
 // 生成图片
@@ -1217,22 +1219,12 @@ app.post('/api/generate', async (req, res) => {
         
         const taskId = result.taskId || result.id || result.data?.taskId || result.data?.id;
         
-        // 记录任务
-        const task = {
-            id: taskId,
-            accountId: account.id,
-            prompt,
-            imageSize,
-            aspectRatio,
-            status: 'pending',
-            createdAt: new Date().toISOString()
-        };
-        data.tasks.push(task);
-        saveData(data);
+        // 记录任务 (已移除)
+        // saveData(data);
         
-        res.json({ 
-            success: true, 
-            data: { 
+        res.json({
+            success: true,
+            data: {
                 taskId,
                 accountEmail: account.email
             }
@@ -1271,14 +1263,7 @@ app.post('/api/generate/batch', async (req, res) => {
             const taskId = result.taskId || result.id || result.data?.taskId;
             results.push({ success: true, taskId, accountEmail: account.email });
             
-            // 记录任务
-            data.tasks.push({
-                id: taskId,
-                accountId: account.id,
-                prompt,
-                status: 'pending',
-                createdAt: new Date().toISOString()
-            });
+            // 记录任务 (已移除)
             
         } catch (error) {
             results.push({ success: false, message: error.message });
@@ -1290,7 +1275,7 @@ app.post('/api/generate/batch', async (req, res) => {
         }
     }
     
-    saveData(data);
+    // saveData(data);
     res.json({ success: true, data: results });
 });
 
@@ -1440,9 +1425,10 @@ app.get('/api/images', async (req, res) => {
     let allImages = [];
     
     // 如果指定了账户，只获取该账户的图片
+    // 如果未指定账户，则获取所有积分 < 60 的账户（积分>=60默认无图，跳过以优化速度）
     const accountsToFetch = accountId
         ? data.accounts.filter(a => a.id === accountId)
-        : data.accounts;
+        : data.accounts.filter(a => a.credits < 60);
     
     // 并行获取所有账户的图片（带并发限制，防止触发防火墙）
     const results = [];
@@ -1845,61 +1831,67 @@ app.listen(PORT, () => {
 
 // ==================== 心跳与自动任务 ====================
 
-let lastCreditsRefresh = 0;
-let lastAutoCheckin = '';
+// 心跳任务：每5秒并发刷新所有账户积分
+// 添加锁机制防止重叠执行
+let heartbeatRunning = false;
 
-// 心跳任务
 async function heartbeat() {
-    const now = Date.now();
-    const today = new Date().toISOString().split('T')[0];
+    // 防止重叠执行
+    if (heartbeatRunning) {
+        return;
+    }
+    heartbeatRunning = true;
     
-    // 检查是否需要刷新积分（每5分钟）
-    if (now - lastCreditsRefresh > CREDITS_REFRESH_INTERVAL) {
-        console.log('[心跳] 刷新所有账户积分...');
-        for (const account of data.accounts) {
-            if (account.token) {
+    try {
+        // 重新加载数据，确保获取最新状态（如账户删除）
+        data = loadData();
+        
+        const accountsToRefresh = data.accounts.filter(a => a.token);
+        if (accountsToRefresh.length === 0) {
+            heartbeatRunning = false;
+            return;
+        }
+
+        // 并发请求，每批次最多 5 个，防止瞬间请求过多
+        const BATCH_SIZE = 5;
+        let hasChanges = false;
+
+        for (let i = 0; i < accountsToRefresh.length; i += BATCH_SIZE) {
+            const batch = accountsToRefresh.slice(i, i + BATCH_SIZE);
+            
+            const promises = batch.map(async (account) => {
                 try {
                     const credits = await getCredits(account.token);
                     if (credits !== null) {
                         const oldCredits = account.credits;
                         account.credits = credits;
                         if (oldCredits !== credits) {
-                            console.log(`[心跳] ${account.email}: 更新账户积分，实际积分为：${credits}`);
+                            console.log(`[心跳] ${account.email}: 积分变更 ${oldCredits} -> ${credits}`);
+                            hasChanges = true;
                         }
+                        return true;
                     }
                 } catch (e) {
-                    console.error(`[心跳] 刷新 ${account.email} 积分失败:`, e.message);
+                    // 静默处理错误
                 }
+                return false;
+            });
+
+            await Promise.all(promises);
+            
+            // 批次之间稍微间隔，避免请求过快
+            if (i + BATCH_SIZE < accountsToRefresh.length) {
+                await new Promise(r => setTimeout(r, 200));
             }
         }
+
+        // 保存数据
         saveData(data);
-        lastCreditsRefresh = now;
-    }
-    
-    // 检查是否需要自动签到（每天一次）
-    const currentHour = new Date().getHours();
-    if (currentHour >= AUTO_CHECKIN_HOUR && lastAutoCheckin !== today) {
-        console.log('[心跳] 执行每日自动签到...');
-        let successCount = 0;
-        for (const account of data.accounts) {
-            if (account.token) {
-                try {
-                    const success = await checkIn(account.token);
-                    if (success) {
-                        successCount++;
-                        account.lastCheckIn = new Date().toISOString();
-                        console.log(`[心跳] ${account.email} 签到成功`);
-                    }
-                } catch (e) {
-                    console.error(`[心跳] ${account.email} 签到失败:`, e.message);
-                }
-                // 签到间隔，避免请求过快
-                await new Promise(r => setTimeout(r, 1000));
-            }
-        }
-        saveData(data);
-        lastAutoCheckin = today;
-        console.log(`[心跳] 自动签到完成: ${successCount}/${data.accounts.length}`);
+        
+    } catch (e) {
+        console.error('[心跳] 执行出错:', e.message);
+    } finally {
+        heartbeatRunning = false;
     }
 }
 
@@ -1907,6 +1899,9 @@ async function heartbeat() {
 setInterval(heartbeat, HEARTBEAT_INTERVAL);
 
 // 启动时立即执行一次
-setTimeout(heartbeat, 5000);
+console.log('[系统] 正在初始化积分数据...');
+heartbeat().then(() => {
+    console.log('[系统] 初始积分刷新完成');
+});
 
-console.log(`[心跳] 已启动，间隔 ${HEARTBEAT_INTERVAL/1000}秒，积分刷新间隔 ${CREDITS_REFRESH_INTERVAL/1000}秒`);
+console.log(`[心跳] 已启动，间隔 ${HEARTBEAT_INTERVAL/1000}秒，并发刷新积分`);

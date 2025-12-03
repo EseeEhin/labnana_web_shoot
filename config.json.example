@@ -14,8 +14,8 @@
     "defaultRatio": "1:1",
     "interval": 2000
   },
-  "affiliate": {
-    "//": "注册成功后自动跳转的推广链接",
-    "redirectUrl": "https://labnana.com/?aff=your-affiliate-code"
+  "postRegister": {
+    "//": "注册成功后自动跳转的链接（可选）",
+    "redirectUrl": ""
   }
 }
